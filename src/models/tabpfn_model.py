@@ -1,15 +1,18 @@
-"""TabPFN v2 (tabpfn paket, privzeti hiperparametri).
+"""TabPFN v3 (tabpfn paket >= 8, privzeti hiperparametri).
 
 Eksperiment: podatke podamo v čim bolj surovi obliki (brez naše predobdelave)
 in preverimo, kaj model obravnava nativno. Če surovi vhod sproži napako, to
 zabeležimo (raw_error) in šele nato uporabimo minimalni popravek - ne
 predobdelujemo tiho.
 
-Ugotovljeno na dejanskih podatkih: TabPFN-jeva interna predobdelava zna
-obravnavati pandas 'category' stolpce, a odpove na 'object' stolpcih, ki
-vsebujejo prazne/manjkajoče vrednosti (npr. stolpec TBG v datasetu 'sick').
-Minimalni popravek: kategorične stolpce ordinalno kodiramo v številske kode,
-NaN ohranimo (TabPFN NaN obravnava nativno).
+Ugotovljeno na dejanskih podatkih: TabPFN-3 surove podatke obravnava nativno
+na vseh treh datasetih, vključno z 'object' stolpci z manjkajočimi vrednostmi
+(npr. stolpec TBG v datasetu 'sick'), kjer je TabPFN v2 (tabpfn 2.0.9) še
+potreboval fallback. Fallback (ordinalno kodiranje kategoričnih stolpcev,
+NaN ohranjen) je ohranjen kot varovalka za nove datasete.
+
+Opomba: prva uporaba zahteva enkraten sprejem licence prek PriorLabs računa
+(interaktivna prijava v brskalniku ali TABPFN_TOKEN okoljska spremenljivka).
 """
 
 import time

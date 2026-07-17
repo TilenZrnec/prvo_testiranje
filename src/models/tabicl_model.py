@@ -3,11 +3,11 @@
 Eksperiment: podatke podamo v čim bolj surovi obliki. Če surovi vhod sproži
 napako, to zabeležimo (raw_error) in šele nato uporabimo minimalni popravek.
 
-Ugotovljeno na dejanskih podatkih: to ni podatkovna težava, temveč napaka
-privzete nastavitve device='auto' v tem okolju (torch/cuda kombinacija) -
-'Expected a torch.device with a specified index or an integer, but got: cuda'.
-Minimalni popravek: eksplicitno podamo device='cuda:0' (oz. 'cpu', če GPU ni
-na voljo). Same podatke (categorical_cols) ne spreminjamo.
+Ugotovljeno na dejanskih podatkih: s torch 2.4.1 je privzeta nastavitev
+device='auto' sprožila napako ('Expected a torch.device with a specified
+index or an integer, but got: cuda') in je bil potreben fallback z
+eksplicitnim device='cuda:0'. Po nadgradnji na torch 2.13 surovi zagon
+deluje brez fallbacka; fallback je ohranjen kot varovalka.
 """
 
 import time

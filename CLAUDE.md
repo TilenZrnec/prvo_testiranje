@@ -52,21 +52,28 @@ Comments and docstrings in the codebase are written in Slovenian. Currently
   experiment is to see what each model handles natively. Each model's
   `run()` tries the raw fold first; only on an exception does it apply a
   logged minimal fix and retry:
-  - TabPFN: raw works except when a column is `object`-dtype with unparsable
-    values (e.g. an all-missing OpenML column) → falls back to ordinal-encoding
-    categorical columns (NaN preserved).
-  - TabICL: raw data itself is never the problem; `device='auto'` fails to
-    resolve a torch device index in this WSL2/CUDA setup → falls back to an
-    explicit `device='cuda:0'` (or `'cpu'` if no GPU).
+  - TabPFN (v3, `tabpfn` 8.x): raw input works on all current datasets,
+    including `object`-dtype columns with unparsable/all-missing values
+    (v2 needed an ordinal-encoding fallback there — kept as a safety net
+    for future datasets, NaN preserved).
+  - TabICL: raw input works. Under torch 2.4.1, `device='auto'` failed to
+    resolve a torch device index in this WSL2/CUDA setup and a fallback to
+    explicit `device='cuda:0'` was needed; fixed by the torch 2.13 upgrade,
+    fallback kept as a safety net.
   Never silently preprocess — every raw failure + the fix applied is
   recorded in `results/preprocessing_log.md`.
 
 ## Environment
 - Runs under WSL2 (Ubuntu) on Windows 11; working directory is on the
   Windows filesystem at `/mnt/d/fri/Diplomska/prvo_testiranje`.
-- Conda env: `tabular` (Python 3.10). GPU: NVIDIA RTX 3060, `torch` 2.4.1+cu121,
+- Conda env: `tabular` (Python 3.10). GPU: NVIDIA RTX 3060, `torch` 2.13.0+cu130,
   `torch.cuda.is_available()` is `True`. Run project scripts with
   `conda run -n tabular python -m src.<module>` (or activate the env first).
+- TabPFN v3 (`tabpfn` 8.x) requires a one-time license acceptance via a
+  PriorLabs account; the credential is cached locally on this machine. On a
+  fresh machine: interactive first `fit()` opens a browser login (needs a
+  real TTY — `conda activate`, not `conda run`), or set `TABPFN_TOKEN` from
+  https://ux.priorlabs.ai/account for headless use.
 - `src/data.py` resolves the OpenML cache path relative to the repo root
   (`data/openml_cache`), not hardcoded — safe if the repo is moved.
 
