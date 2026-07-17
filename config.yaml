@@ -1,0 +1,27 @@
+random_state: 42
+n_splits: 5
+
+datasets:
+  - id: 31
+    name: credit-g
+  - id: 37
+    name: diabetes
+  # OpenML ID 3021 iz prvotnih navodil ne obstaja (server vrne "Unknown dataset").
+  # ID 38 je standardni "sick" dataset (ščitnica, manjkajoče vrednosti + kategorične
+  # spremenljivke) in ustreza namenu eksperimenta - potrjeno z uporabnikom.
+  - id: 38
+    name: sick
+
+algorithms:
+  - random_forest
+  - xgboost
+  - lightgbm
+  - catboost
+  - tabpfn
+  - tabicl
+
+cache_dir: data/openml_cache
+
+output:
+  results_csv: results/results.csv
+  preprocessing_log: results/preprocessing_log.md
