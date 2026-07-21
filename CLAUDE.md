@@ -85,6 +85,23 @@ Comments and docstrings in the codebase are written in Slovenian. Currently
   ("Unknown dataset"); 38 is the standard "sick" thyroid dataset and was
   confirmed with the user as the intended substitute.
 
+## Arnes HPC
+- The benchmark also runs on the Arnes SLURM cluster (GPU partition `gpu`,
+  H100 nodes). Env: micromamba prefix at `~/envs/tabular` (micromamba binary
+  at `~/bin/micromamba`, no shell activation hooks in batch scripts).
+- TabPFN token lives in `~/.tabpfn_token` (sourced by the batch script);
+  compute nodes run offline (`HF_HUB_OFFLINE=1`), so run
+  `python scripts/prestage.py` on the login node first — it caches OpenML
+  datasets 31/37/38 and the TabPFN/TabICL weights (TabICL on CPU).
+- `src/run_one_dataset.py --index N --ids-file scripts/subset_ids.json` runs
+  all REGISTRY algorithms on the Nth OpenML ID and writes
+  `results/per_dataset/<openml_id>.csv`; exits early ("already done") if the
+  file exists, so re-submitted arrays skip finished datasets.
+- Submit from the repo root: `sbatch scripts/run_subset.sh` (array 0-2; fill
+  `--account`/`--reservation` from `sacctmgr show assoc user=$USER`).
+- `scripts/merge_results.py <out.csv>` concatenates per-dataset CSVs;
+  `scripts/compare_results.py <local.csv> <arnes.csv>` diffs ROC-AUC.
+
 ## Conventions
 - Each model module fails soft: exceptions are caught and stored in
   `result["error"]` rather than raised, so one failing (dataset, algorithm,

@@ -6,9 +6,6 @@ datasets:
     name: credit-g
   - id: 37
     name: diabetes
-  # OpenML ID 3021 iz prvotnih navodil ne obstaja (server vrne "Unknown dataset").
-  # ID 38 je standardni "sick" dataset (ščitnica, manjkajoče vrednosti + kategorične
-  # spremenljivke) in ustreza namenu eksperimenta - potrjeno z uporabnikom.
   - id: 38
     name: sick
 

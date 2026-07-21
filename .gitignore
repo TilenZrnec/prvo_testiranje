@@ -7,3 +7,7 @@ venv/
 
 data/openml_cache/
 catboost_info/
+
+logs/
+.cache/
+*.sif
