@@ -34,7 +34,19 @@
 #   (RF prek n_jobs=-1, ostali prek OMP_NUM_THREADS spodaj).
 #   8 h na task je torej velikodušna rezerva; ker je polje
 #   omejeno (throttle) in odporno na ponovni zagon, je preveliki --time
-#   poceni, prekratki pa zavrže cel task.
+#   poceni, prekratki pa le podaljša skupni čas (ne izgubi dela - glej
+#   kontrolne točke spodaj).
+#   TODO: pred zagonom preveri zgornjo mejo particije in QOS ter --time
+#   dvigni proti njej (manj ponovnih oddaj):
+#       scontrol show partition gpu | grep -i maxtime
+#       sacctmgr show qos normal format=Name,MaxWall
+#
+# Kontrolne točke: src/run_one_dataset.py po vsakem (algoritem, fold) učenju
+#   zapiše <id>.csv.partial in šele na koncu atomarno preimenuje v <id>.csv.
+#   Prekinjen task (prekoračen --time, preemption) torej ne izgubi dela -
+#   ponovna oddaja nadaljuje pri prvem nenarejenem učenju. Tudi posamezen
+#   dolg algoritem (CatBoost na Devnagari-Script) lahko svojih 5 foldov
+#   razporedi čez več taskov, namesto da bi se v nedogled ponavljal.
 #   --mem=64G: CIFAR_10 kot float64 zasede ~1,4 GiB na kopijo; predobdelava,
 #   train/test razrez in CatBoostova kvantizacija držijo več kopij hkrati -
 #   64G da ~40x rezerve nad surovo matriko. (Pilotni MaxRSS iz sacct je le

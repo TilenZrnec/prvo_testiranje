@@ -31,6 +31,16 @@ def main():
         print(f"Ni najdenih CSV-jev v {args.input_dir}")
         return
 
+    # *.partial so nedokončani dataseti (task je npr. presegel --time). V merge
+    # namenoma ne gredo, a moraš zanje vedeti - zato glasno opozorilo.
+    partials = sorted(glob.glob(os.path.join(args.input_dir, "*.partial")))
+    if partials:
+        print(f"OPOZORILO: {len(partials)} nedokončanih datasetov (*.partial) - NISO v merge:")
+        for path in partials:
+            n_done = len(pd.read_csv(path))
+            print(f"  {os.path.basename(path)}: {n_done} od 30 učenj; oddaj znova za dokončanje")
+        print()
+
     merged = pd.concat([pd.read_csv(p) for p in paths], ignore_index=True)
     merged.to_csv(args.output_csv, index=False)
 

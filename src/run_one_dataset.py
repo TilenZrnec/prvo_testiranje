@@ -10,6 +10,21 @@ obstoječim load_dataset (isti StratifiedKFold foldi kot lokalno) in zapiše
 results/per_dataset/<openml_id>.csv. Če izhodna datoteka že obstaja, izpiše
 "already done" in se konča z 0 - ponovni zagon arraya torej preskoči že
 narejene datasete.
+
+Kontrolne točke (checkpointing) na nivoju posameznega učenja
+------------------------------------------------------------
+Vsak (algoritem, fold) par je ena vrstica rezultata. Po vsakem takem učenju
+se celoten dosedanji rezultat zapiše v <openml_id>.csv.partial. Če task
+prekine SLURM (prekoračen --time) ali preemption, ponovni zagon prebere
+partial in preskoči samo tiste (algoritem, fold) pare, ki so že narejeni -
+delo se torej nikoli ne izgubi in dolg algoritem (npr. CatBoost na velikem
+datasetu) lahko svojih 5 foldov razporedi čez več taskov.
+
+Ključno: končni <openml_id>.csv nastane šele z atomarnim os.replace() iz
+partiala, ko so vse vrstice zbrane. Nepopoln rezultat se torej NIKOLI ne
+more pretvarjati, da je popoln - "already done" pomeni res dokončano.
+Tudi partial se piše atomarno (prek .tmp), da ga prekinitev sredi pisanja
+ne pusti okrnjenega in s tem ne pokvari nadaljevanja.
 """
 
 import argparse
@@ -26,6 +41,18 @@ from src.data import load_dataset  # noqa: E402
 from src.models import REGISTRY  # noqa: E402
 
 
+def write_partial(rows, partial_path):
+    """Atomarno zapiše trenutne vrstice v partial (prek .tmp + os.replace).
+
+    Zapis prek začasne datoteke pomeni, da je partial vedno veljaven CSV -
+    prekinitev sredi pisanja ga ne more pustiti okrnjenega in s tem pokvariti
+    nadaljevanja ob naslednjem zagonu.
+    """
+    tmp_path = partial_path + ".tmp"
+    pd.DataFrame(rows).to_csv(tmp_path, index=False)
+    os.replace(tmp_path, partial_path)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Zagon vseh algoritmov na enem OpenML datasetu.")
     parser.add_argument("--index", type=int, required=True, help="Indeks ID-ja v datoteki z ID-ji")
@@ -40,9 +67,20 @@ def main():
 
     out_dir = os.path.join(REPO_ROOT, "results", "per_dataset")
     out_path = os.path.join(out_dir, f"{openml_id}.csv")
+    partial_path = out_path + ".partial"
     if os.path.exists(out_path):
         print("already done")
         return
+    os.makedirs(out_dir, exist_ok=True)
+
+    # Nadaljevanje po prekinitvi: kaj je iz prejšnjega taska že narejeno.
+    rows = []
+    done = set()
+    if os.path.exists(partial_path):
+        previous = pd.read_csv(partial_path)
+        rows = previous.to_dict("records")
+        done = {(str(a), int(f)) for a, f in zip(previous["algorithm"], previous["fold"])}
+        print(f"Najden partial: {len(done)} učenj že narejenih, nadaljujem.")
 
     cache_dir = os.path.join(REPO_ROOT, "data", "openml_cache")
     dataset = load_dataset(openml_id, n_splits=5, random_state=42, cache_dir=cache_dir)
@@ -54,9 +92,11 @@ def main():
         f"{X.shape[1]} atributov, {len(categorical_cols)} kategoričnih ==="
     )
 
-    rows = []
     for algo_name, run_fn in REGISTRY.items():
         for fold_idx, (train_idx, test_idx) in enumerate(dataset["folds"]):
+            if (algo_name, fold_idx) in done:
+                continue
+
             X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
             y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
 
@@ -76,9 +116,12 @@ def main():
                 "error": result["error"],
             })
 
-    os.makedirs(out_dir, exist_ok=True)
-    pd.DataFrame(rows).to_csv(out_path, index=False)
-    print(f"Rezultati shranjeni v {out_path}")
+            write_partial(rows, partial_path)
+
+    write_partial(rows, partial_path)
+    # Atomarno: <id>.csv se pojavi šele zdaj, ko so vse vrstice zbrane.
+    os.replace(partial_path, out_path)
+    print(f"Rezultati shranjeni v {out_path} ({len(rows)} vrstic)")
 
 
 if __name__ == "__main__":

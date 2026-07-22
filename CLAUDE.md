@@ -1,4 +1,6 @@
 # PRVO TESTIRANJE — Diploma Project (FRI)
+#  Style
+Explain things to me as if i am a compleete beginner.
 
 ## Purpose
 Benchmarking 6 classical/foundation-model tabular ML algorithms on OpenML
@@ -109,11 +111,28 @@ Comments and docstrings in the codebase are written in Slovenian. Currently
   all REGISTRY algorithms on the Nth OpenML ID and writes
   `results/per_dataset/<openml_id>.csv`; exits early ("already done") if the
   file exists, so re-submitted arrays skip finished datasets.
+- **Per-fit checkpointing.** After every single (algorithm, fold) fit,
+  `run_one_dataset.py` rewrites `<openml_id>.csv.partial`; the final
+  `<openml_id>.csv` is produced only at the end via **atomic `os.replace()`**.
+  Two consequences: a killed task (`--time` overrun, preemption) loses no
+  work — the next submission reads the partial and skips only the fits
+  already recorded — and a partial can never masquerade as a complete result,
+  so "already done" always means genuinely done. Granularity is per *fit*,
+  not per algorithm, so one slow algorithm (CatBoost on Devnagari-Script)
+  can spread its 5 folds across several tasks instead of restarting from
+  fold 0 forever. The partial itself is also written atomically (via `.tmp`),
+  so a kill mid-write can't corrupt it. Verified 2026-07-22 with a kill/resume
+  test: killed at 9/30 fits → no `38.csv` present, only the partial; resumed
+  → 30 rows, identical row order, **max Δ 0.0** vs. a clean single-shot run;
+  re-run after completion → "already done".
 - Submit from the repo root: `sbatch scripts/run_subset.sh` (array 0-2; fill
   `--account`/`--reservation` from `sacctmgr show assoc user=$USER`).
 - `scripts/merge_results.py <out.csv> [--input-dir DIR]` concatenates
   per-dataset CSVs (default `results/per_dataset/`);
   `scripts/compare_results.py <local.csv> <arnes.csv>` diffs ROC-AUC.
+  The merge globs `*.csv` only, so unfinished `*.partial` datasets are
+  excluded — and it prints a loud warning listing each one with its
+  fits-done count, so an incomplete sweep surfaces instead of hiding.
 - `scripts/profile_datasets.py --ids-file FILE [--top N] [--from-cache]`
   prints n_rows × n_features per dataset, sorted descending — the data-driven
   input for sizing `--time`/`--mem`. Default reads OpenML metadata (needs
@@ -128,27 +147,38 @@ Comments and docstrings in the codebase are written in Slovenian. Currently
 2. **Prestage on the login node** (internet):
    `python scripts/prestage.py --ids-file scripts/cc18_ids.json`, then check
    the printed cache size and `du -sh ~` against the 100 GB quota.
-3. **Clear scratch, then submit**: `rm -f results/per_dataset/*.csv` and
+3. **Clear scratch, then submit**: `rm -rf results/per_dataset/*` (**all** of
+   it — `.csv`, `.partial` and `.partial.tmp`; a stale partial from an older
+   code version would otherwise poison a resume) and
    `sbatch scripts/run_cc18.sh` (array `0-71%4`, `--time=08:00:00`,
    `--mem=64G`, otherwise identical plumbing to `run_subset.sh`).
-   Two values still need confirming **on the cluster**: the `%4` throttle
-   against the per-user GPU cap (`sacctmgr show qos normal
-   format=Name,MaxTRESPU%40,MaxJobsPU`) and the time/mem sizing against the
-   pilot receipts. Both are marked in the script and in
+   Values still to confirm **on the cluster**: the `%4` throttle against the
+   per-user GPU cap (`sacctmgr show qos normal
+   format=Name,MaxTRESPU%40,MaxJobsPU`), and `--time` against the partition/QOS
+   ceiling (`scontrol show partition gpu | grep -i maxtime`, `sacctmgr show qos
+   normal format=Name,MaxWall`) — raise it toward that ceiling to cut the
+   number of resubmissions. All marked in the script and in
    `results/arnes_cc18/PROVENANCE.md`.
 4. **Merge and summarise**:
    `python scripts/merge_results.py results/results_arnes_cc18.csv` then
    `python -m src.summary`. Never merge into `results/results.csv`.
-- **Resume / re-submit**: the array is resume-safe — re-running
-  `sbatch scripts/run_cc18.sh` recomputes only datasets without a
-  `results/per_dataset/<id>.csv`. So a task killed by a too-short `--time` is
-  fixed by raising `--time` and submitting again; finished datasets print
-  "already done" and cost seconds. The script also verifies that the `--array`
-  upper bound matches the ID count and aborts loudly if it doesn't.
+5. **Completeness check**: expect **72 × 6 × 5 = 2160** rows. Fewer rows, or
+   any `*.partial` left in `results/per_dataset/` (the merge lists them), means
+   those datasets hit the wall — raise `--time` and re-submit; they resume
+   from where they stopped. A fit that *failed* still produces its row, with
+   the reason in `error`, so missing rows always mean "unfinished", never
+   "failed".
+- **Resume / re-submit**: the array is resume-safe at two levels — whole
+  datasets with a `<id>.csv` print "already done" and cost seconds, and a
+  dataset interrupted mid-way resumes from its partial at the first unfinished
+  (algorithm, fold) fit. So a task killed by a too-short `--time` is fixed by
+  raising `--time` and submitting again, with no lost compute. The script also
+  verifies that the `--array` upper bound matches the ID count and aborts
+  loudly if it doesn't.
 - **CC18 contains the pilot datasets 31/37/38**, so the resume logic *would*
   skip them if their CSVs are still in `results/per_dataset/`. Two options:
-  (a) knowingly reuse the validated pilot CSVs, or (b) `rm -f
-  results/per_dataset/*.csv` first, so all 72 datasets come from one code
+  (a) knowingly reuse the validated pilot CSVs, or (b) `rm -rf
+  results/per_dataset/*` first, so all 72 datasets come from one code
   version and one environment. **(b) is the recommendation for the thesis
   run** — single-version provenance; the pilot results stay archived in
   `results/arnes_subset/`.

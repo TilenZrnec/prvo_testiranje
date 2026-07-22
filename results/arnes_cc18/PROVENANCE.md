@@ -74,9 +74,12 @@ du -sh ~/.cache/openml ~
 ## 3. Oddaja polja
 
 ```bash
-rm -f results/per_dataset/*.csv        # enotna provenanca, glej 1.
+rm -rf results/per_dataset/*           # enotna provenanca, glej 1. in 4.
 sbatch scripts/run_cc18.sh
 ```
+
+Briše se **vse**, ne le `*.csv`: zastarel `*.partial` iz starejše verzije kode
+bi se ob nadaljevanju prebral in zastrupil rezultat.
 
 | Direktiva | Vrednost | Utemeljitev |
 |---|---|---|
@@ -96,9 +99,17 @@ sbatch scripts/run_cc18.sh
 > sacctmgr show qos normal format=Name,MaxTRESPU%40,MaxJobsPU
 > ```
 
-Polje je odporno na ponovni zagon: `sbatch scripts/run_cc18.sh` se lahko odda
-znova (npr. po prekratkem `--time`) — dataseti z že zapisanim
-`results/per_dataset/<id>.csv` izpišejo `already done` in se preskočijo.
+> **TODO (gruča):** preveri zgornjo mejo `--time` in jo dvigni proti njej —
+> manj ponovnih oddaj:
+>
+> ```bash
+> scontrol show partition gpu | grep -i maxtime
+> sacctmgr show qos normal format=Name,MaxWall
+> ```
+
+Polje je odporno na ponovni zagon na **dveh** nivojih: dataseti z že zapisanim
+`results/per_dataset/<id>.csv` izpišejo `already done` in se preskočijo, dataset
+prekinjen sredi dela pa se nadaljuje pri prvem nenarejenem učenju (glej 4.).
 
 ## 4. Dimenzioniranje `--time` in `--mem`
 
@@ -163,6 +174,33 @@ zaradi tega popravka **ostaja veljavna** — RF vrstice so nespremenjene.
 `-1` se razreši prek joblib, ki upošteva SLURM-ovo cpuset/cgroup dodelitev,
 zato pomeni 8 jeder in ne vseh jeder vozlišča.
 
+### Kontrolne točke (dodano pred zagonom, 2026-07-22)
+
+`src/run_one_dataset.py` po **vsakem** (algoritem, fold) učenju prepiše
+`<id>.csv.partial`; končni `<id>.csv` nastane šele na koncu z atomarnim
+`os.replace()`. Prekinjen task (prekoračen `--time`, preemption) torej ne
+izgubi dela, nepopoln rezultat pa se ne more pretvarjati, da je popoln.
+
+Granularnost je namenoma na nivoju posameznega učenja in ne algoritma:
+najhujši realni scenarij ni "task s 6 počasnimi algoritmi", ampak **en**
+algoritem, ki s svojimi 5 foldi skupaj preseže `--time` (CatBoost na
+Devnagari-Script: 92000 × 1024, 46 razredov → 1000 iteracij × 46 dreves na
+iteracijo). Pri kontrolnih točkah na nivoju algoritma bi tak algoritem ob
+vsaki ponovni oddaji začel pri foldu 0 in se nikoli ne dokončal; pri
+kontrolnih točkah na nivoju učenja pade npr. 3 folde v prvi task in 2 v
+naslednjega. Partial se piše atomarno (prek `.tmp`), da ga prekinitev sredi
+pisanja ne pusti okrnjenega.
+
+**Test prekinitve in nadaljevanja (2026-07-22, lokalno, dataset 38):**
+
+| Korak | Izid |
+|---|---|
+| 1. Čist enkratni zagon (referenca) | 30 vrstic |
+| 2. Zagon, ubit pri 9/30 učenjih | ostane le `38.csv.partial`; končnega `38.csv` **ni** |
+| 3. Ponovni zagon | "Najden partial: 9 učenj že narejenih"; dokonča na 30 vrstic |
+| 4. Primerjava z referenco | 30/30 vrstic, enak vrstni red, **max Δ roc_auc = 0.0** |
+| 5. Še en zagon po dokončanju | `already done` |
+
 Pričakovano je, da TabPFN in/ali TabICL na največjih datasetih padeta na
 omejitvah velikosti. To je **sprejemljivo in namerno**: fails-soft pogodba
 napako zapiše v stolpec `error` posamezne vrstice, task se konča normalno,
@@ -173,10 +211,18 @@ dataseti dejansko odpovejo.
 
 ```bash
 sacct -j <jobid> --format=JobID,JobName%20,Elapsed,MaxRSS,State,NodeList   # potrdila
+ls results/per_dataset/*.partial 2>/dev/null                              # nedokončani?
 cp results/per_dataset/*.csv results/arnes_cc18/                          # kuriranje
 python scripts/merge_results.py results/results_arnes_cc18.csv --input-dir results/arnes_cc18
 python -m src.summary
 ```
+
+**Preverjanje popolnosti: pričakovanih je 72 × 6 × 5 = 2160 vrstic.** Manj
+vrstic ali kakršenkoli preostali `*.partial` (`merge_results.py` jih izpiše z
+opozorilom in jih ne vključi v merge) pomeni dataset, ki je zadel ob steno —
+dvigni `--time` in oddaj znova, nadaljeval bo, kjer je ostal. Učenje, ki
+*pade*, svojo vrstico vseeno zapiše (razlog v stolpcu `error`), zato manjkajoče
+vrstice vedno pomenijo "nedokončano" in nikoli "neuspešno".
 
 Združeni CSV gre v `results/results_arnes_cc18.csv`. **Nikoli** v
 `results/results.csv` — to je nespremenljiva lokalna referenca (RTX 3060).
