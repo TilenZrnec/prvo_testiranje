@@ -99,8 +99,33 @@ Comments and docstrings in the codebase are written in Slovenian. Currently
   file exists, so re-submitted arrays skip finished datasets.
 - Submit from the repo root: `sbatch scripts/run_subset.sh` (array 0-2; fill
   `--account`/`--reservation` from `sacctmgr show assoc user=$USER`).
-- `scripts/merge_results.py <out.csv>` concatenates per-dataset CSVs;
+- `scripts/merge_results.py <out.csv> [--input-dir DIR]` concatenates
+  per-dataset CSVs (default `results/per_dataset/`);
   `scripts/compare_results.py <local.csv> <arnes.csv>` diffs ROC-AUC.
+
+### Operational lessons (learned 2026-07-22, validation run)
+- **The cluster remote uses SSH**, not HTTPS: `git@github.com:...`. The
+  cluster has no credential helper for HTTPS, so an `https://` remote
+  prompts for a password and fails in a batch context.
+- **Scratch vs. curated results.** `results/per_dataset/` is *scratch*: it is
+  gitignored, and `run_one_dataset.py` treats an existing
+  `<openml_id>.csv` there as "already done" and skips the dataset. Therefore
+  **`rm -rf results/per_dataset/*` before any real run** — otherwise stale
+  files silently suppress recomputation. This actually happened: a
+  git-committed local CSV made array task 0 skip, contaminating the first
+  attempt with local numbers presented as cluster numbers. Curated,
+  publishable results are committed under their own directory (e.g.
+  `results/arnes_subset/`) with a `PROVENANCE.md`.
+- **Merges always write to a new file.** Never merge into or overwrite
+  `results/results.csv` — it is the immutable local RTX 3060 baseline.
+  Cluster merges go to `results/results_arnes_subset.csv` and similar.
+- **Job receipts via `sacct`.** After every cluster run, record the receipt:
+  `sacct -j <jobid> --format=JobID,JobName%20,Elapsed,MaxRSS,State,NodeList`.
+  Elapsed/MaxRSS per task go into the run's `PROVENANCE.md` — they are the
+  input for sizing `--time` and `--mem` on the larger CC18 array.
+- Validation outcome: cluster vs. local agreement is exact (bit-identical)
+  for RF/XGBoost/LightGBM/CatBoost and ~1e-4 for TabPFN/TabICL (GPU
+  nondeterminism, SM86 vs SM90). See `results/arnes_subset/PROVENANCE.md`.
 
 ## Conventions
 - Each model module fails soft: exceptions are caught and stored in

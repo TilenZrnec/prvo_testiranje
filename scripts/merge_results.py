@@ -1,7 +1,9 @@
-"""Združi vse CSV-je iz results/per_dataset/ v en skupni CSV.
+"""Združi vse per-dataset CSV-je iz mape v en skupni CSV.
 
-Zagon: python scripts/merge_results.py <izhodni.csv>
+Zagon: python scripts/merge_results.py <izhodni.csv> [--input-dir MAPA]
 
+Privzeta vhodna mapa je results/per_dataset/ (scratch izhod SLURM polja);
+z --input-dir se združi kurirana mapa, npr. results/arnes_subset/.
 Izpiše število vrstic in datasetov ter koliko vrstic ima neprazno napako.
 """
 
@@ -17,11 +19,16 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def main():
     parser = argparse.ArgumentParser(description="Združevanje per-dataset CSV-jev.")
     parser.add_argument("output_csv", help="Pot do izhodnega skupnega CSV-ja")
+    parser.add_argument(
+        "--input-dir",
+        default=os.path.join(REPO_ROOT, "results", "per_dataset"),
+        help="Mapa s per-dataset CSV-ji (privzeto results/per_dataset/)",
+    )
     args = parser.parse_args()
 
-    paths = sorted(glob.glob(os.path.join(REPO_ROOT, "results", "per_dataset", "*.csv")))
+    paths = sorted(glob.glob(os.path.join(args.input_dir, "*.csv")))
     if not paths:
-        print("Ni najdenih CSV-jev v results/per_dataset/")
+        print(f"Ni najdenih CSV-jev v {args.input_dir}")
         return
 
     merged = pd.concat([pd.read_csv(p) for p in paths], ignore_index=True)
