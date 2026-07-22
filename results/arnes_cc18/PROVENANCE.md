@@ -1,0 +1,164 @@
+# Provenance — celotni zagon OpenML-CC18 na Arnes HPC
+
+> **Status: PRED ZAGONOM.** Ta dokument je pripravljen vnaprej (predregistracija
+> postopka). Rezultati (`<openml_id>.csv`, sodba, sacct potrdila) se dopolnijo
+> po zagonu; mesta, ki zahtevajo vrednosti z gruče, so označena s **TODO**.
+>
+> Predhodnik: `results/arnes_subset/PROVENANCE.md` — validacija pilotne
+> podmnožice (31/37/38), sodba ALL PASS.
+
+## 1. Pripenjanje seznama datasetov
+
+```bash
+python scripts/gen_cc18_ids.py
+```
+
+Prebere `openml.study.get_suite(99)` (alias `OpenML-CC18`, ime "OpenML-CC18
+Curated Classification benchmark"), vzame ID-je iz `suite.data`, odstrani
+podvojene, uredi naraščajoče in zapiše `scripts/cc18_ids.json`. Skript se
+konča z napako, če OpenML ne vrne natanko 72 datasetov.
+
+| Postavka | Vrednost |
+|---|---|
+| Datoteka | `scripts/cc18_ids.json` (commitana v repo) |
+| Število ID-jev | 72 (unikatnih, urejenih naraščajoče) |
+| SHA-256 | `5af5ec87b7e0a774dda1f4397f4d26938f8c234ff00f4c5980e86fe92c17ece7` |
+| Datum pridobitve | 2026-07-22 |
+| openml verzija | 0.14.2 |
+
+Preverjanje ob poznejšem zagonu:
+
+```bash
+sha256sum scripts/cc18_ids.json
+python -c "import json; ids=json.load(open('scripts/cc18_ids.json')); print(len(ids), ids==sorted(set(ids)))"
+```
+
+Seznam se ob oddaji SLURM polja **ne** pridobiva znova — s tem je obseg
+eksperimenta fiksiran in tiha sprememba zbirke na OpenML ne more neopazno
+spremeniti rezultatov diplome.
+
+### Prekrivanje s pilotom
+
+CC18 vsebuje vse tri pilotne datasete (31 credit-g, 37 diabetes, 38 sick).
+Resume logika (`run_one_dataset.py` preskoči obstoječ
+`results/per_dataset/<id>.csv`) bi jih ob prisotnosti starih datotek
+preskočila. Za diplomski zagon velja: **pred zagonom se
+`results/per_dataset/*.csv` pobriše**, da vseh 72 datasetov izvira iz iste
+verzije kode in istega okolja (enotna provenanca). Pilotni rezultati ostanejo
+ločeno arhivirani v `results/arnes_subset/`.
+
+## 2. Predpriprava (prijavno vozlišče, potrebuje internet)
+
+```bash
+python scripts/prestage.py --ids-file scripts/cc18_ids.json
+```
+
+Prenese vseh 72 datasetov v predpomnilnik OpenML in enkrat fitta TabPFN ter
+TabICL, da se prenesejo uteži (računska vozlišča tečejo z `HF_HUB_OFFLINE=1`).
+Neuspeli prenos posameznega dataseta ne prekine predpriprave — napake se
+izpišejo na koncu, izhodna koda je 1.
+
+Na koncu izpiše skupno velikost predpomnilnika OpenML. **Pozor:** `openml`
+0.14 ignorira pripis `openml.config.cache_directory` iz `src/data.py`, zato
+predpomnilnik dejansko pristane v `~/.cache/openml/org/openml/www` in ne v
+`data/openml_cache`. Na gruči to pomeni, da šteje v kvoto domačega imenika
+(100 GB) — preveri pred oddajo:
+
+```bash
+du -sh ~/.cache/openml ~
+```
+
+> **TODO (gruča):** vpiši dejansko velikost predpomnilnika po predpripravi
+> vseh 72 datasetov in zasedenost domačega imenika.
+
+## 3. Oddaja polja
+
+```bash
+rm -f results/per_dataset/*.csv        # enotna provenanca, glej 1.
+sbatch scripts/run_cc18.sh
+```
+
+| Direktiva | Vrednost | Utemeljitev |
+|---|---|---|
+| `--partition` | `gpu` | enako kot pilot |
+| `--constraint` | `h100` | enako kot pilot (validirano na SM90) |
+| `--account` | `fri-users` | enako kot pilot |
+| `--gres` | `gpu:1` | TabPFN/TabICL |
+| `--cpus-per-task` | 8 | enako kot pilot |
+| `--array` | `0-71%4` | 72 ID-jev → zgornja meja 71; `%4` = throttle |
+| `--time` | `08:00:00` | glej 4. |
+| `--mem` | `64G` | glej 4. |
+
+> **TODO (gruča):** potrdi throttle `%4` glede na omejitev GPU-jev na
+> uporabnika in ga po potrebi zvišaj:
+>
+> ```bash
+> sacctmgr show qos normal format=Name,MaxTRESPU%40,MaxJobsPU
+> ```
+
+Polje je odporno na ponovni zagon: `sbatch scripts/run_cc18.sh` se lahko odda
+znova (npr. po prekratkem `--time`) — dataseti z že zapisanim
+`results/per_dataset/<id>.csv` izpišejo `already done` in se preskočijo.
+
+## 4. Dimenzioniranje `--time` in `--mem`
+
+Pilotna potrdila so **spodnja meja, ne zgornja.** Pilot (job `17731379`,
+dataseti 31/37/38) je tekel po ~10–60 s na task, ker so ti dataseti drobni
+(največ 3772 × 29). Ta števila povedo le, da režijski stroški (nalaganje
+okolja, uteži, GPU init) niso problem — ne povedo ničesar o največjih CC18
+datasetih.
+
+> **TODO (gruča):** dopolni natančna pilotna potrdila (vhod za spodnjo mejo):
+>
+> ```bash
+> sacct -j 17731379 --format=JobID,Elapsed,MaxRSS,MaxVMSize,State,ExitCode
+> ```
+
+### Največji dataseti v CC18
+
+Iz `python scripts/profile_datasets.py --ids-file scripts/cc18_ids.json --top 5`
+(metapodatki OpenML; `atributi` = brez ciljne spremenljivke):
+
+| ID | ime | vrstice | atributi | razredi | celice |
+|---|---|---|---|---|---|
+| 40927 | CIFAR_10 | 60000 | 3072 | 10 | 184.320.000 |
+| 40923 | Devnagari-Script | 92000 | 1024 | 46 | 94.208.000 |
+| 554 | mnist_784 | 70000 | 784 | 10 | 54.880.000 |
+| 40996 | Fashion-MNIST | 70000 | 784 | 10 | 54.880.000 |
+| 4134 | Bioresponse | 3751 | 1776 | 2 | 6.661.776 |
+
+### Izbira
+
+- **`--time=08:00:00`.** Na task se izvede 6 algoritmov × 5 foldov = 30 učenj.
+  Na CIFAR_10/Devnagari sta CatBoost (privzeto 1000 iteracij) in RandomForest
+  na 8 jedrih lahko po več deset minut na fold, TabPFN/TabICL pa sta na GPU
+  dolga repa. 8 h da velikodušno rezervo; ker je polje omejeno s throttlom in
+  odporno na ponovni zagon, je predolg `--time` poceni (task se konča prej),
+  prekratek pa zavrže cel task tik pred koncem.
+- **`--mem=64G`.** CIFAR_10 kot `float64` zasede ~1,4 GiB na kopijo
+  (60000 × 3072 × 8 B). Predobdelava (ordinalno kodiranje, imputacija),
+  train/test razrez po foldih in CatBoostova kvantizacija držijo več kopij
+  hkrati; 64 G da ~40× rezerve nad surovo matriko. Pilotni `MaxRSS` je pri
+  tem le spodnja meja.
+
+Pričakovano je, da TabPFN in/ali TabICL na največjih datasetih padeta na
+omejitvah velikosti. To je **sprejemljivo in namerno**: fails-soft pogodba
+napako zapiše v stolpec `error` posamezne vrstice, task se konča normalno,
+odločitev o morebitnem poduzorčenju pa se sprejme šele, ko bo znano, kateri
+dataseti dejansko odpovejo.
+
+## 5. Po zagonu
+
+```bash
+sacct -j <jobid> --format=JobID,JobName%20,Elapsed,MaxRSS,State,NodeList   # potrdila
+cp results/per_dataset/*.csv results/arnes_cc18/                          # kuriranje
+python scripts/merge_results.py results/results_arnes_cc18.csv --input-dir results/arnes_cc18
+python -m src.summary
+```
+
+Združeni CSV gre v `results/results_arnes_cc18.csv`. **Nikoli** v
+`results/results.csv` — to je nespremenljiva lokalna referenca (RTX 3060).
+
+> **TODO (gruča) po zagonu:** job ID, vozlišča, tabela Elapsed/MaxRSS po
+> taskih, število vrstic (pričakovano 72 × 6 × 5 = 2160), število vrstic z
+> neprazno napako in seznam datasetov, kjer je kateri algoritem odpovedal.

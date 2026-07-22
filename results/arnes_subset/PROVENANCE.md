@@ -22,10 +22,14 @@ na gruči Arnes in njegovo primerjavo z lokalno referenco.
 > za vsak task (`17731379_0`, `_1`, `_2`) na to mesto:
 >
 > ```bash
-> sacct -j 17731379 --format=JobID,JobName%20,Elapsed,MaxRSS,State,NodeList
+> sacct -j 17731379 --format=JobID,Elapsed,MaxRSS,MaxVMSize,State,ExitCode
 > ```
 >
 > Groba meritev iz zagona: ~10–60 s na task.
+>
+> Ta števila so vhod za dimenzioniranje `--time`/`--mem` celotnega CC18 polja,
+> a **le kot spodnja meja** — pilotni dataseti so drobni (največ 3772 × 29),
+> CC18 pa vsebuje tudi 60000 × 3072. Glej `results/arnes_cc18/PROVENANCE.md`.
 
 ## Datoteke
 

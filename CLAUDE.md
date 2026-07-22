@@ -76,6 +76,15 @@ Comments and docstrings in the codebase are written in Slovenian. Currently
   https://ux.priorlabs.ai/account for headless use.
 - `src/data.py` resolves the OpenML cache path relative to the repo root
   (`data/openml_cache`), not hardcoded — safe if the repo is moved.
+  **Caveat (verified 2026-07-22):** under `openml` 0.14.2 the assignment
+  `openml.config.cache_directory = ...` is a no-op — the library reads
+  `_root_cache_directory` (settable only via
+  `openml.config.set_root_cache_directory()`), so the cache actually lands in
+  `~/.cache/openml/org/openml/www` and `data/openml_cache` stays empty. Left
+  as-is deliberately (changing it would move the cache mid-project); it only
+  matters for **disk-quota accounting on Arnes**, where the cache counts
+  against the 100 GB home quota. `scripts/prestage.py` therefore measures the
+  *effective* directory via `openml.config.get_cache_directory()`.
 
 ## Datasets (OpenML IDs, set in `config.yaml`)
 - 31 — credit-g (1000 rows, 20 attrs, 13 categorical, no missing values)
@@ -91,8 +100,11 @@ Comments and docstrings in the codebase are written in Slovenian. Currently
   at `~/bin/micromamba`, no shell activation hooks in batch scripts).
 - TabPFN token lives in `~/.tabpfn_token` (sourced by the batch script);
   compute nodes run offline (`HF_HUB_OFFLINE=1`), so run
-  `python scripts/prestage.py` on the login node first — it caches OpenML
-  datasets 31/37/38 and the TabPFN/TabICL weights (TabICL on CPU).
+  `python scripts/prestage.py [--ids-file FILE]` on the login node first — it
+  caches every dataset in the ids-file (default `scripts/subset_ids.json` =
+  31/37/38) plus the TabPFN/TabICL weights (TabICL on CPU), and prints the
+  resulting cache size for the 100 GB home-quota check. Per-dataset download
+  failures don't abort it; they're listed at the end and it exits 1.
 - `src/run_one_dataset.py --index N --ids-file scripts/subset_ids.json` runs
   all REGISTRY algorithms on the Nth OpenML ID and writes
   `results/per_dataset/<openml_id>.csv`; exits early ("already done") if the
@@ -102,6 +114,49 @@ Comments and docstrings in the codebase are written in Slovenian. Currently
 - `scripts/merge_results.py <out.csv> [--input-dir DIR]` concatenates
   per-dataset CSVs (default `results/per_dataset/`);
   `scripts/compare_results.py <local.csv> <arnes.csv>` diffs ROC-AUC.
+- `scripts/profile_datasets.py --ids-file FILE [--top N] [--from-cache]`
+  prints n_rows × n_features per dataset, sorted descending — the data-driven
+  input for sizing `--time`/`--mem`. Default reads OpenML metadata (needs
+  internet, no full download); `--from-cache` loads the cached datasets.
+
+### Full CC18 sweep (72 datasets) — runbook
+1. **Pin the ID set** (once, already done and committed):
+   `python scripts/gen_cc18_ids.py` → `scripts/cc18_ids.json`, 72 IDs from
+   `openml.study.get_suite(99)`, deduped and sorted; hard-fails if OpenML
+   returns ≠ 72 so a silent suite change can't slip through. The file is
+   committed, so the sweep does not re-fetch the suite at submit time.
+2. **Prestage on the login node** (internet):
+   `python scripts/prestage.py --ids-file scripts/cc18_ids.json`, then check
+   the printed cache size and `du -sh ~` against the 100 GB quota.
+3. **Clear scratch, then submit**: `rm -f results/per_dataset/*.csv` and
+   `sbatch scripts/run_cc18.sh` (array `0-71%4`, `--time=08:00:00`,
+   `--mem=64G`, otherwise identical plumbing to `run_subset.sh`).
+   Two values still need confirming **on the cluster**: the `%4` throttle
+   against the per-user GPU cap (`sacctmgr show qos normal
+   format=Name,MaxTRESPU%40,MaxJobsPU`) and the time/mem sizing against the
+   pilot receipts. Both are marked in the script and in
+   `results/arnes_cc18/PROVENANCE.md`.
+4. **Merge and summarise**:
+   `python scripts/merge_results.py results/results_arnes_cc18.csv` then
+   `python -m src.summary`. Never merge into `results/results.csv`.
+- **Resume / re-submit**: the array is resume-safe — re-running
+  `sbatch scripts/run_cc18.sh` recomputes only datasets without a
+  `results/per_dataset/<id>.csv`. So a task killed by a too-short `--time` is
+  fixed by raising `--time` and submitting again; finished datasets print
+  "already done" and cost seconds. The script also verifies that the `--array`
+  upper bound matches the ID count and aborts loudly if it doesn't.
+- **CC18 contains the pilot datasets 31/37/38**, so the resume logic *would*
+  skip them if their CSVs are still in `results/per_dataset/`. Two options:
+  (a) knowingly reuse the validated pilot CSVs, or (b) `rm -f
+  results/per_dataset/*.csv` first, so all 72 datasets come from one code
+  version and one environment. **(b) is the recommendation for the thesis
+  run** — single-version provenance; the pilot results stay archived in
+  `results/arnes_subset/`.
+- Expect TabPFN/TabICL to fail-soft on the largest CC18 datasets
+  (CIFAR_10 60000×3072, Devnagari-Script 92000×1024, mnist_784 and
+  Fashion-MNIST 70000×784). That is logged in the row's `error` column by
+  design; no subsampling is implemented — revisit only after seeing which
+  datasets actually break.
 
 ### Operational lessons (learned 2026-07-22, validation run)
 - **The cluster remote uses SSH**, not HTTPS: `git@github.com:...`. The
