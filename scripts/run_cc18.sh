@@ -27,10 +27,12 @@
 #   ti dataseti drobni. CC18 vsebuje bistveno večje: CIFAR_10 (60000 x 3072),
 #   Devnagari-Script (92000 x 1024), mnist_784 in Fashion-MNIST (70000 x 784).
 #   Na task se izvede 6 algoritmov x 5 foldov = 30 učenj; na največjih
-#   datasetih sta CatBoost (1000 iteracij) in RandomForest na 8 jedrih lahko
-#   po več deset minut na fold, TabPFN/TabICL pa sta na GPU dolga repa (ali
+#   datasetih sta CatBoost (1000 iteracij) in RandomForest lahko po več deset
+#   minut na fold, TabPFN/TabICL pa sta na GPU dolga repa (ali
 #   pa fail-soft padeta na omejitvah velikosti - to je sprejemljivo in se
-#   zabeleži). 8 h na task je torej velikodušna rezerva; ker je polje
+#   zabeleži). Vsi štirje ansambli uporabljajo vseh 8 dodeljenih jeder
+#   (RF prek n_jobs=-1, ostali prek OMP_NUM_THREADS spodaj).
+#   8 h na task je torej velikodušna rezerva; ker je polje
 #   omejeno (throttle) in odporno na ponovni zagon, je preveliki --time
 #   poceni, prekratki pa zavrže cel task.
 #   --mem=64G: CIFAR_10 kot float64 zasede ~1,4 GiB na kopijo; predobdelava,

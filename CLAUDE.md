@@ -190,3 +190,17 @@ Comments and docstrings in the codebase are written in Slovenian. Currently
   folds, and every model's `random_state`).
 - All algorithms use **default hyperparameters** — this is intentional per
   the thesis protocol, not an oversight to "fix".
+- **One deliberate non-default: `RandomForestClassifier(n_jobs=-1)`.** This is
+  a compute setting, not a hyperparameter — trees are independent, so it
+  changes only wall-clock, never the fitted model. Verified 2026-07-22:
+  `predict_proba` bit-identical serial vs. parallel on synthetic 20000×300 and
+  20000×800, and all 30 `sick` rows reproduce `results/results.csv` exactly
+  (max Δ 0.0 across all six algorithms) with the flag in place — so the pilot's
+  ALL PASS verdict is unaffected. Without it RF was the only one of the four
+  ensembles running single-core: XGBoost, LightGBM and CatBoost all default to
+  every available core (capped by the batch script's `OMP_NUM_THREADS=8`).
+  Measured speedup 8.1× (20000×300) and 6.9× (20000×800) on 12 cores; on tiny
+  datasets it costs ~0.1–1 s of thread-pool overhead per dataset, which is the
+  right trade against hours on the giant CC18 sets. `-1` resolves through
+  joblib, which honours the SLURM cpuset/cgroup allocation, so it means 8 cores
+  on the cluster, not the whole node.

@@ -43,7 +43,11 @@ def run(X_train, y_train, X_test, y_test, categorical_cols):
         ])
         clf = Pipeline([
             ("preprocess", preprocessor),
-            ("model", RandomForestClassifier(random_state=42)),
+            # n_jobs=-1 ni hiperparameter modela, ampak nastavitev računanja:
+            # drevesa so neodvisna, zato so napovedi bitno identične serijskim
+            # (preverjeno), le izračun teče na vseh dodeljenih jedrih. Brez tega
+            # RF kot edini od štirih ansamblov uporablja eno jedro od osmih.
+            ("model", RandomForestClassifier(random_state=42, n_jobs=-1)),
         ])
 
         t0 = time.perf_counter()

@@ -131,8 +131,8 @@ Iz `python scripts/profile_datasets.py --ids-file scripts/cc18_ids.json --top 5`
 
 - **`--time=08:00:00`.** Na task se izvede 6 algoritmov × 5 foldov = 30 učenj.
   Na CIFAR_10/Devnagari sta CatBoost (privzeto 1000 iteracij) in RandomForest
-  na 8 jedrih lahko po več deset minut na fold, TabPFN/TabICL pa sta na GPU
-  dolga repa. 8 h da velikodušno rezervo; ker je polje omejeno s throttlom in
+  lahko po več deset minut na fold, TabPFN/TabICL pa sta na GPU dolga repa.
+  8 h da velikodušno rezervo; ker je polje omejeno s throttlom in
   odporno na ponovni zagon, je predolg `--time` poceni (task se konča prej),
   prekratek pa zavrže cel task tik pred koncem.
 - **`--mem=64G`.** CIFAR_10 kot `float64` zasede ~1,4 GiB na kopijo
@@ -140,6 +140,28 @@ Iz `python scripts/profile_datasets.py --ids-file scripts/cc18_ids.json --top 5`
   train/test razrez po foldih in CatBoostova kvantizacija držijo več kopij
   hkrati; 64 G da ~40× rezerve nad surovo matriko. Pilotni `MaxRSS` je pri
   tem le spodnja meja.
+
+### Paralelizacija (popravek pred zagonom, 2026-07-22)
+
+`RandomForestClassifier` je bil edini od štirih ansamblov brez `n_jobs` in je
+zato tekel na **enem** jedru od osmih (XGBoost, LightGBM in CatBoost privzeto
+uporabljajo vsa jedra, omejena z `OMP_NUM_THREADS=8`). Popravljeno z
+`n_jobs=-1` v `src/models/random_forest.py`.
+
+`n_jobs` ni hiperparameter modela, ampak nastavitev računanja — drevesa so
+neodvisna, zato se rezultat ne spremeni. Preverjeno:
+
+| Test | Izid |
+|---|---|
+| `predict_proba` serijsko vs. `n_jobs=-1`, sintetično 20000 × 300 in 20000 × 800 | bitno identično |
+| Vseh 30 vrstic dataseta `sick` proti `results/results.csv` s popravkom | max Δ = 0.0 (vseh 6 algoritmov) |
+| Pohitritev na 12 jedrih, 20000 × 300 / 20000 × 800 | 8,1× / 6,9× |
+| Režija na drobnih datasetih (pilotni trije) | ~0,1–1 s na dataset |
+
+Sodba pilotne validacije (`results/arnes_subset/PROVENANCE.md`, ALL PASS)
+zaradi tega popravka **ostaja veljavna** — RF vrstice so nespremenjene.
+`-1` se razreši prek joblib, ki upošteva SLURM-ovo cpuset/cgroup dodelitev,
+zato pomeni 8 jeder in ne vseh jeder vozlišča.
 
 Pričakovano je, da TabPFN in/ali TabICL na največjih datasetih padeta na
 omejitvah velikosti. To je **sprejemljivo in namerno**: fails-soft pogodba
