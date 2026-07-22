@@ -8,9 +8,7 @@
 #SBATCH --time=00:30:00
 #SBATCH --array=0-2
 #SBATCH --output=logs/subset-%A_%a.out
-# Po potrebi izpolni iz: sacctmgr show assoc user=$USER
-##SBATCH --account=
-##SBATCH --reservation=
+#SBATCH --account=fri-users
 
 set -euo pipefail
 
